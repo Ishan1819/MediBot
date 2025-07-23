@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from Backend.models.hospital_finder import get_maternity_hospitals_nearby
+from ..models.hospital_finder import get_maternity_hospitals_nearby
 
 router = APIRouter()
 

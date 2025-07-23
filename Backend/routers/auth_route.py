@@ -1,30 +1,35 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
-from pymongo import MongoClient
-from bson.objectid import ObjectId
-from passlib.hash import bcrypt
+import pymysql
+import bcrypt
 import os
 from dotenv import load_dotenv
+from pymysql.cursors import DictCursor 
+# from database import connection 
 
-# Load environment variables from .env
 load_dotenv()
 
-# Get the MongoDB URI from the environment
-MONGO_URI = os.getenv("MONGO_URI")
-if not MONGO_URI:
-    raise RuntimeError("MONGO_URI not set in environment")
+# Load DB credentials
+MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
+MYSQL_USER = os.getenv("MYSQL_USER")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
+MYSQL_DATABASE = os.getenv("MYSQL_DATABASE")
 
-# Connect to MongoDB
-client = MongoClient(MONGO_URI)
-db = client["medibot"]
-users_collection = db["users"]
+# Connect to MySQL
+connection = pymysql.connect(
+    host=MYSQL_HOST,
+    user=MYSQL_USER,
+    password=MYSQL_PASSWORD,
+    database=MYSQL_DATABASE,
+    cursorclass=DictCursor,
+    autocommit=True
+)
 
 router = APIRouter()
 
 
-# Pydantic models
+# Pydantic Models
 class SignupData(BaseModel):
-    name: str
     email: EmailStr
     password: str
 
@@ -34,42 +39,43 @@ class LoginData(BaseModel):
     password: str
 
 
-# Sign Up Route
+# 🔐 Sign Up Route
 @router.post("/signup")
 async def signup(data: SignupData):
-    existing_user = users_collection.find_one({"email": data.email})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT id FROM users WHERE email = %s", (data.email,))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="Email already registered")
 
-    hashed_password = bcrypt.hash(data.password)
-    new_user = {
-        "name": data.name,
-        "email": data.email,
-        "password": hashed_password,
-    }
+        hashed_pw = bcrypt.hashpw(data.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        cursor.execute("INSERT INTO users (email, password_hash) VALUES (%s, %s)", (data.email, hashed_pw))
 
-    result = users_collection.insert_one(new_user)
-    user_id = str(result.inserted_id)
-
-    return {
-        "id": user_id,
-        "name": data.name,
-        "email": data.email,
-    }
+    return {"message": "✅ Sign up successful", "email": data.email}
 
 
-# Login Route
+# 🔓 Login Route
 @router.post("/login")
 async def login(data: LoginData):
-    user = users_collection.find_one({"email": data.email})
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+    with connection.cursor() as cursor:
+        # Check if email exists
+        cursor.execute("SELECT id, password_hash FROM users WHERE email = %s", (data.email,))
+        user = cursor.fetchone()
 
-    if not bcrypt.verify(data.password, user["password"]):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        if not user:
+            raise HTTPException(
+                status_code=404,
+                detail="Username not valid. Please signup first"
+            )
+
+        # Check if password matches
+        if not bcrypt.checkpw(data.password.encode('utf-8'), user["password_hash"].encode('utf-8')):
+            raise HTTPException(
+                status_code=401,
+                detail="Password doesn't match"
+            )
 
     return {
-        "id": str(user["_id"]),
-        "name": user["name"],
-        "email": user["email"],
+        "message": "✅ Login successful",
+        "user_id": user["id"],
+        "email": data.email
     }

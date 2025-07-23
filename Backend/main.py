@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from Backend.routers import reminder_route, whisper_route, hospital_route, rag_route, auth_route
+from Backend.routers import reminder_route, whisper_route, hospital_route, rag_route, auth_route    
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware  
 import uvicorn

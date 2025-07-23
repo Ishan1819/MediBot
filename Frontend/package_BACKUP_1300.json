@@ -19,16 +19,11 @@
     "test": "craco test",
     "eject": "react-scripts eject"
   },
-<<<<<<< HEAD
+
   "proxy": "http://localhost:8000",
-=======
->>>>>>> 5b2c3d7de24705ed46f555512511419b71d64d9c
+
   "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
+    "production": [">0.2%", "not dead", "not op_mini all"],
     "development": [
       "last 1 chrome version",
       "last 1 firefox version",
