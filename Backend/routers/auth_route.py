@@ -43,7 +43,7 @@ class LoginData(BaseModel):
 @router.post("/signup")
 async def signup(data: SignupData):
     with connection.cursor() as cursor:
-        cursor.execute("SELECT id FROM users WHERE email = %s", (data.email,))
+        cursor.execute("SELECT user_id FROM users WHERE email = %s", (data.email,))
         if cursor.fetchone():
             raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -58,7 +58,7 @@ async def signup(data: SignupData):
 async def login(data: LoginData):
     with connection.cursor() as cursor:
         # Check if email exists
-        cursor.execute("SELECT id, password_hash FROM users WHERE email = %s", (data.email,))
+        cursor.execute("SELECT user_id, password_hash FROM users WHERE email = %s", (data.email,))
         user = cursor.fetchone()
 
         if not user:
@@ -76,6 +76,6 @@ async def login(data: LoginData):
 
     return {
         "message": "✅ Login successful",
-        "user_id": user["id"],
+        "user_id": user["user_id"],
         "email": data.email
     }

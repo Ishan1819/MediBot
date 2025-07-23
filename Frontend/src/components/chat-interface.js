@@ -278,7 +278,6 @@ import { Menu, Send, PaperclipIcon, Home, Mic } from "lucide-react";
 import ChatMessage from "./chat-message";
 import Sidebar from "./sidebar";
 
-
 export default function ChatInterface({ toggleSidebar, isLoggedIn }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [messages, setMessages] = useState(() => {
@@ -323,18 +322,27 @@ export default function ChatInterface({ toggleSidebar, isLoggedIn }) {
     setMessages((prevMessages) => [...prevMessages, newMessage]);
 
     try {
+      const userId = localStorage.getItem("user_id");
+
+      if (!userId) {
+        alert("Please sign in first to use the chatbot.");
+        navigate("/signin");
+        return;
+      }
+
       const response = await fetch("http://localhost:8000/rag/query_rag/", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          user_id: parseInt(userId, 10), // ✅ Convert to integer
           message: inputText,
         }),
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`); // Fixed template literal
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();

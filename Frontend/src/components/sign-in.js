@@ -13,7 +13,7 @@ export default function SignIn({ onLogin }) {
   });
 
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(""); // 🆕 Error state
+  const [error, setError] = useState("");
 
   const navigate = useNavigate();
 
@@ -25,7 +25,7 @@ export default function SignIn({ onLogin }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
-    setError(""); // Clear previous errors
+    setError("");
 
     try {
       const response = await fetch("http://localhost:8000/api/login", {
@@ -36,16 +36,26 @@ export default function SignIn({ onLogin }) {
 
       if (!response.ok) {
         const errData = await response.json();
-        setError(errData.detail || "Login failed"); // 🆕 Show FastAPI error
+        setError(errData.detail || "Login failed");
         throw new Error(errData.detail || "Login failed");
       }
 
       const user = await response.json();
-      onLogin(user);
+
+      // ✅ Store user_id in localStorage
+      localStorage.setItem("user_id", user.user_id);
+
+      // Optional: store more like email
+      localStorage.setItem("email", user.email);
+
+      // Optional: call parent onLogin
+      if (onLogin) {
+        onLogin(user);
+      }
+
       navigate("/chat");
     } catch (error) {
       console.error("Login error:", error);
-      // Already handled above
     } finally {
       setIsLoading(false);
     }
@@ -68,7 +78,7 @@ export default function SignIn({ onLogin }) {
           </h1>
         </div>
 
-        {/* 🛑 Error message */}
+        {/* Error message */}
         {error && (
           <div className="text-red-500 text-sm mb-4 text-center">{error}</div>
         )}
