@@ -27,4 +27,4 @@ app.include_router(whisper_route.router, prefix="/api/speech", tags=["Speech Rec
 app.include_router(auth_route.router, prefix="/api", tags=["Authentication"])
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8002)
