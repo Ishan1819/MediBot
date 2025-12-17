@@ -28,9 +28,10 @@ export default function SignIn({ onLogin }) {
     setError("");
 
     try {
-      const response = await fetch("http://localhost:8000/api/login", {
+      const response = await fetch("http://localhost:8002/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include", // Required to receive and send cookies
         body: JSON.stringify(formData),
       });
 

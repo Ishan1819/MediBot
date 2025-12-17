@@ -39,9 +39,10 @@ export default function SignUp({ onLogin }) {
     setIsLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8000/api/signup", {
+      const response = await fetch("http://localhost:8002/api/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include", // Required to receive and send cookies
         body: JSON.stringify({
           name: formData.name,
           email: formData.email,
@@ -61,7 +62,6 @@ export default function SignUp({ onLogin }) {
       setIsLoading(false);
     }
   };
-  
 
   return (
     <div className="auth-page">
@@ -161,7 +161,6 @@ export default function SignUp({ onLogin }) {
             {isLoading ? "Creating account..." : "Create Account"}
           </Button>
         </form>
-
 
         <div className="auth-footer">
           <p>

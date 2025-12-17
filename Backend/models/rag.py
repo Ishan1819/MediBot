@@ -72,19 +72,42 @@ for url in career_urls:
         text = extract_text_from_website(url)
         collection.add(ids=[url], documents=[text])
 
-genai.configure(api_key="AIzaSyDlrKlKH2GkELdceGC9LpagYmkbvJfzyck")
+genai.configure(api_key="AIzaSyDlC2TVSnLedPYPZW2RON1pi99ZF2jM7lE")
 
 conversation_history = []
 
-def get_best_maternity_guide(query, results, conversation_history):
-    """Fetches the best response based on AI guidance and retrieved documents."""
+def get_best_maternity_guide(query, results, conversation_history, target_language="en"):
+    """
+    Fetches the best response based on AI guidance and retrieved documents.
+    
+    Args:
+        query: User query (in English after translation)
+        results: ChromaDB search results
+        conversation_history: List of conversation history
+        target_language: Language code for response (default: "en")
+    
+    Returns:
+        str: Response in the target language
+    """
     if not results["documents"]:
-        return "Sorry, I couldn't find relevant information."
+        error_msg = "Sorry, I couldn't find relevant information."
+        # Translate error message if needed
+        if target_language != "en":
+            from Backend.models.translator import translate_from_english
+            return translate_from_english(error_msg, target_language)
+        return error_msg
 
     matched_texts = "\n\n".join(results["documents"][0])
     conversation_history.append(f"User Query: {query}")
 
-    system_prompt = """
+    # Update system prompt to include language instruction
+    language_instruction = ""
+    if target_language != "en":
+        from Backend.models.translator import LANGUAGE_NAMES
+        lang_name = LANGUAGE_NAMES.get(target_language, target_language)
+        language_instruction = f"\n\nIMPORTANT: You MUST respond in {lang_name} language only. Do not use English in your response."
+    
+    system_prompt = f"""
     
     You are a helpful assistant specializing in pregnancy and postpartum care.
     Your task is to provide accurate and friendly responses based on the user's query and the provided information.
@@ -94,19 +117,19 @@ def get_best_maternity_guide(query, results, conversation_history):
     3. If the user asks about anything else → Give a relevant response based on the question.
     
     ALWAYS understand the user's intent before responding.
-    NEVER assume a topic unless the user clearly asks for it.
+    NEVER assume a topic unless the user clearly asks for it.
 
     Don't answer in paragraphs, always use bullet points and sections.
     Use markdown formatting for clarity and readability.
     Use **bold** for important terms and *italics* for emphasis.
 
     You are a medical advisor specializing in pregnancy and postpartum care.
-    Answer in short, concise, summarize and precise sentences.
+    Answer in short, concise, summarize and precise sentences.{language_instruction}
     """
 
     user_prompt = f"User Query: {query}\n\nExtracted Information:\n{matched_texts}\n\nHistory:\n{conversation_history}"
 
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.0-flash-exp")
     response = model.generate_content(system_prompt + "\n\n" + user_prompt)
 
     # Clean up the response to ensure proper formatting

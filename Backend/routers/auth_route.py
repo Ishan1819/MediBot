@@ -159,7 +159,16 @@ async def login(data: LoginData, response: Response):
         "email": data.email
     }
     # Set cookie - convert dict to JSON string
-    response.set_cookie(key="user", value=json.dumps(user_info), httponly=True, samesite="lax")
+    # Using httponly=False for development to allow JavaScript access if needed
+    # In production, consider httponly=True with secure=True
+    response.set_cookie(
+        key="user", 
+        value=json.dumps(user_info), 
+        httponly=False,  # Allow JavaScript to read cookie
+        samesite="lax",  # CSRF protection
+        path="/",  # Cookie available for all paths
+        max_age=86400  # 24 hours expiry
+    )
 
     return {
         "message": "✅ Login successful",
