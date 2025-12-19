@@ -74,17 +74,115 @@ for url in career_urls:
 
 genai.configure(api_key="AIzaSyDlC2TVSnLedPYPZW2RON1pi99ZF2jM7lE")
 
-conversation_history = []
 
-def get_best_maternity_guide(query, results, conversation_history, target_language="en"):
+def needs_history_context(query: str) -> bool:
+    """
+    Uses LLM to determine if the current query depends on previous conversation context.
+    
+    Args:
+        query: Current user query (in English)
+    
+    Returns:
+        bool: True if query needs conversation history, False otherwise
+    """
+    try:
+        prompt = f"""You are a conversation analyzer. Your task is to determine if the following question requires previous conversation context to be answered correctly.
+
+Question: "{query}"
+
+Does this question DEPEND ON or REFER TO previous conversation context (e.g., uses words like "it", "that", "tell me more", "continue", "elaborate", "what about", etc.)?
+
+Answer with ONLY one word: YES or NO
+
+Answer:"""
+        
+        model = genai.GenerativeModel("gemini-2.0-flash-exp")
+        response = model.generate_content(prompt)
+        answer = response.text.strip().upper()
+        
+        return "YES" in answer
+    except Exception as e:
+        print(f"Error in needs_history_context: {e}")
+        # Default to False - treat as independent query
+        return False
+
+
+def summarize_conversation_history(history: list) -> str:
+    """
+    Uses LLM to summarize conversation history into concise bullet points.
+    
+    Args:
+        history: List of dicts with 'user' and 'assistant' keys
+    
+    Returns:
+        str: Concise summary (1-2 bullet points) of medical topics discussed
+    """
+    if not history:
+        return ""
+    
+    try:
+        # Format history for summarization
+        formatted_history = ""
+        for i, exchange in enumerate(history[-5:], 1):  # Last 5 exchanges max
+            formatted_history += (
+                f"\nExchange {i}:\n"
+                f"User: {exchange['user']}\n"
+                f"Assistant: {exchange['assistant']}\n"
+            )
+        
+        prompt = f"""
+You are a MEDICAL CONVERSATION SUMMARIZER.
+
+Your task is to identify the LAST ACTIVE MEDICAL TOPIC discussed in the conversation
+and the user's intent related to that topic.
+
+IMPORTANT RULES:
+- If the current or recent user queries are VERY SHORT or VAGUE
+  (e.g. "safe?", "is it safe?", "dangerous?", "explain", "tell me more", "continue"),
+  you MUST infer that they refer to the LAST CLEAR MEDICAL TOPIC.
+- If there is ANY ambiguity about which topic the user refers to,
+  ALWAYS choose the MOST RECENT medical topic.
+- DO NOT ask clarifying questions.
+- DO NOT introduce new topics.
+- DO NOT include greetings, language, tone, or advice.
+- DO NOT include explanations or recommendations.
+
+Conversation History:
+{formatted_history}
+
+OUTPUT FORMAT:
+- Provide 1–2 SHORT bullet points
+- Each bullet must describe:
+  • the medical topic
+  • the user’s concern or intent
+
+Example output:
+- Iron supplementation during the second trimester and concerns about its safety.
+
+Summary:
+"""
+        
+        model = genai.GenerativeModel("gemini-2.0-flash-exp")
+        response = model.generate_content(prompt)
+        summary = response.text.strip()
+        
+        return summary
+    except Exception as e:
+        print(f"Error in summarize_conversation_history: {e}")
+        return ""
+
+
+
+def get_best_maternity_guide(query, results, conversation_history=None, target_language="en", is_greeting=False):
     """
     Fetches the best response based on AI guidance and retrieved documents.
     
     Args:
         query: User query (in English after translation)
         results: ChromaDB search results
-        conversation_history: List of conversation history
+        conversation_history: List of dicts with 'user' and 'assistant' keys (optional)
         target_language: Language code for response (default: "en")
+        is_greeting: Whether the query is a greeting
     
     Returns:
         str: Response in the target language
@@ -98,36 +196,73 @@ def get_best_maternity_guide(query, results, conversation_history, target_langua
         return error_msg
 
     matched_texts = "\n\n".join(results["documents"][0])
-    conversation_history.append(f"User Query: {query}")
-
-    # Update system prompt to include language instruction
+    
+    # LLM-based follow-up detection and history summarization
+    history_context_for_system = ""
+    topic_anchoring_rule = ""
+    needs_context = False
+    
+    # Only check for history context if NOT a greeting and history exists
+    if conversation_history and not is_greeting:
+        # Check if query needs conversation context
+        # needs_context = needs_history_context(query)
+        
+        # if needs_context:
+            # Summarize conversation history
+        summary = summarize_conversation_history(conversation_history)
+        print(f"Conversation history summary: {summary}")
+        if summary:
+            history_context_for_system = f"\n\nPREVIOUS CONTEXT (FOR UNDERSTANDING ONLY):\n{summary}"
+            # Add topic anchoring rule for follow-ups
+            topic_anchoring_rule = "\n\nTOPIC ANCHORING RULE: This is a FOLLOW-UP question. You MUST answer STRICTLY within the scope of the MOST RECENT medical topic from the previous context. DO NOT introduce new topics or switch subjects. Stay focused on what was just discussed."
+    
+    print("Here")
+    # Language instruction based ONLY on current query - HARD OVERRIDE
     language_instruction = ""
     if target_language != "en":
         from Backend.models.translator import LANGUAGE_NAMES
         lang_name = LANGUAGE_NAMES.get(target_language, target_language)
-        language_instruction = f"\n\nIMPORTANT: You MUST respond in {lang_name} language only. Do not use English in your response."
+        language_instruction = f"\n\nCRITICAL LANGUAGE INSTRUCTION: You MUST respond ONLY in {lang_name} language. IGNORE any language used in previous messages. The response language is determined EXCLUSIVELY by the CURRENT query, NOT by conversation history."
+    
+    # Special handling for greetings - ONLY if no conversation history
+    greeting_instruction = ""
+    if is_greeting and not conversation_history:
+        greeting_instruction = "\n\nGREETING DETECTED: The user has ONLY greeted you. Respond in ENGLISH with ONLY a warm, brief greeting. Example: 'Hello! I'm Dr. MAMA, your pregnancy care assistant. How can I help you today?' DO NOT include any medical information."
+        language_instruction = ""  # Override language instruction for greetings
+    elif is_greeting and conversation_history:
+        # If greeting but history exists, treat as normal query (user might be being polite)
+        pass
     
     system_prompt = f"""
     
-    You are a helpful assistant specializing in pregnancy and postpartum care.
-    Your task is to provide accurate and friendly responses based on the user's query and the provided information.
-
-    1. If the user says "hi", "hello", "hey", or similar greetings → Respond with a friendly greeting.
-    2. If the user asks about pregnancy, babies, or mothers → Provide medical-related information.
-    3. If the user asks about anything else → Give a relevant response based on the question.
+    You are Dr. MAMA, a helpful AI assistant specializing in pregnancy and postpartum care.
+    You were created by Ishan Patil to help expecting mothers and new parents.
     
-    ALWAYS understand the user's intent before responding.
-    NEVER assume a topic unless the user clearly asks for it.
+    CRITICAL RULES:
+    1. GREETINGS → If user ONLY says hi/hello (no question), respond ONLY with: "Hello! I'm Dr. MAMA. How can I help you today?" Nothing else.
+    2. CREATOR → If asked who created you, say "I was created by Ishan Patil."
+    3. LANGUAGE → Respond ONLY in the language of the CURRENT query. COMPLETELY IGNORE any language from conversation history.
+    4. FOLLOW-UP QUESTIONS → If user says "tell me more" or similar, expand ONLY on the previous topic from the context below.
+    5. INDEPENDENT QUESTIONS → If it's a new/different question, provide fresh answer. Don't mix with previous topics.
+    6. FOCUS → Answer ONLY what was asked. No extra summaries unless requested.
+    7. Don't answer in Indonesian (Bahasa Indonesia) 🇮🇩 ever.
+    
+    CONVERSATION HISTORY USAGE:
+    - Previous context is provided ONLY when the current query is a follow-up
+    - History is for topic continuity, NOT for language style
+    - NEVER copy language from history
+    
+    DO NOT repeat greetings in responses to medical questions.
+    DO NOT mix answers from different topics unless explicitly asked.
 
-    Don't answer in paragraphs, always use bullet points and sections.
-    Use markdown formatting for clarity and readability.
-    Use **bold** for important terms and *italics* for emphasis.
-
-    You are a medical advisor specializing in pregnancy and postpartum care.
-    Answer in short, concise, summarize and precise sentences.{language_instruction}
+    For medical information:
+    - Use bullet points and sections for clarity
+    - Use markdown formatting
+    - Use **bold** for important terms and *italics* for emphasis
+    - Keep answers concise and precise{history_context_for_system}{topic_anchoring_rule}{language_instruction}{greeting_instruction}
     """
 
-    user_prompt = f"User Query: {query}\n\nExtracted Information:\n{matched_texts}\n\nHistory:\n{conversation_history}"
+    user_prompt = f"User Query: {query}\n\nExtracted Information:\n{matched_texts}"
 
     model = genai.GenerativeModel("gemini-2.0-flash-exp")
     response = model.generate_content(system_prompt + "\n\n" + user_prompt)
@@ -135,10 +270,4 @@ def get_best_maternity_guide(query, results, conversation_history, target_langua
     # Clean up the response to ensure proper formatting
     formatted_response = response.text.strip()
     
-    '''# Add final note if not present
-    if "consult" not in formatted_response.lower():
-        formatted_response += "\n\n> **Note:** Always consult your healthcare provider for personalized medical advice."
-    '''
-    conversation_history.append(f"AI Response: {formatted_response}")
-
     return formatted_response

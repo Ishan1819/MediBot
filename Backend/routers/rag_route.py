@@ -1,211 +1,7 @@
-# # from fastapi import APIRouter, HTTPException
-# # from pydantic import BaseModel
-# # from ..models.rag import collection, get_best_maternity_guide
-
-# # router = APIRouter()
-
-# # class QueryRequest(BaseModel):
-# #     message: str
-
-# # @router.post("/query_rag/")
-# # async def query_rag(request: QueryRequest):
-# #     try:
-# #         # Query the ChromaDB collection
-# #         results = collection.query(
-# #             query_texts=[request.message],
-# #             n_results=3
-# #         )
-        
-# #         # Get response using the RAG model
-# #         response = get_best_maternity_guide(
-# #             query=request.message,
-# #             results=results,
-# #             conversation_history=[]  # You can maintain conversation history if needed
-# #         )
-        
-# #         return {"response": response}
-    
-# #     except Exception as e:
-# #         print(f"Error in RAG query: {str(e)}")  # Log the error
-# #         raise HTTPException(
-# #             status_code=500,
-# #             detail="Failed to process your query. Please try again."
-# #         )
-        
-        
-        
-        
-        
-        
-        
-# from fastapi import APIRouter, HTTPException
-# from pydantic import BaseModel
-# from ..models.rag import collection, get_best_maternity_guide
-# from Backend.routers.auth_route import connection  # ✅ Import your db connection (adjust if needed)
-
-# router = APIRouter()
-
-# class QueryRequest(BaseModel):
-#     user_id: int
-#     message: str
-
-# @router.post("/query_rag/")
-# async def query_rag(request: QueryRequest):
-#     # data = await request.json()
-#     print("Incoming request:", request.dict())
-#     print("User ID:", request.user_id)
-#     print("Message:", request.message)
-
-#     try:
-#         # Step 1: Query ChromaDB
-#         results = collection.query(
-#             query_texts=[request.message],
-#             n_results=3
-#         )
-        
-#         # Step 2: Get the RAG-based response
-#         response = get_best_maternity_guide(
-#             query=request.message,
-#             results=results,
-#             conversation_history=[]
-#         )
-
-#         # Step 3: Save message + response to DB
-#         with connection.cursor() as cursor:
-#             cursor.execute(
-#                 "INSERT INTO messages (user_id, message, response) VALUES (%s, %s, %s)",
-#                 (request.user_id, request.message, response)
-#             )
-#             connection.commit()
-
-#         # Step 4: Return response to frontend
-#         return {"response": response}
-    
-#     except Exception as e:
-#         print(f"Error in RAG query: {str(e)}")
-#         raise HTTPException(
-#             status_code=500,
-#             detail="Failed to process your query. Please try again."
-#         )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# from fastapi import APIRouter, HTTPException, Request
-# from pydantic import BaseModel
-# import json
-
-# from ..models.rag import collection, get_best_maternity_guide
-# from Backend.routers.auth_route import connection  # import DB connection
-
-# router = APIRouter()
-
-# class QueryRequest(BaseModel):
-#     message: str
-#     # removed user_id from request body, it will come from cookie
-
-
-# @router.post("/query_rag/")
-# async def query_rag(request: Request, data: QueryRequest):
-#     # Extract user info from cookies
-#     user_cookie = request.cookies.get("user")
-#     if not user_cookie:
-#         raise HTTPException(status_code=401, detail="User not authenticated. Please login.")
-
-#     try:
-#         user_info = json.loads(user_cookie)
-#         user_id = user_info.get("user_id")
-#         if not user_id:
-#             raise HTTPException(status_code=401, detail="Invalid user cookie. Please login again.")
-#     except Exception:
-#         raise HTTPException(status_code=401, detail="Invalid user cookie format. Please login again.")
-
-#     print("User ID from cookie:", user_id)
-#     print("Message from request body:", data.message)
-
-#     try:
-#         # Step 1: Query ChromaDB
-#         results = collection.query(
-#             query_texts=[data.message],
-#             n_results=3
-#         )
-
-#         # Step 2: Get the RAG-based response
-#         response_text = get_best_maternity_guide(
-#             query=data.message,
-#             results=results,
-#             conversation_history=[]
-#         )
-
-#         # Step 3: Save message + response to DB with user_id from cookie
-#         with connection.cursor() as cursor:
-#             cursor.execute(
-#                 "INSERT INTO messages (user_id, message, response) VALUES (%s, %s, %s)",
-#                 (user_id, data.message, response_text)
-#             )
-#             connection.commit()
-
-#         # Step 4: Return response to frontend
-#         return {"response": response_text}
-
-#     except Exception as e:
-#         print(f"Error in RAG query: {str(e)}")
-#         raise HTTPException(
-#             status_code=500,
-#             detail="Failed to process your query. Please try again."
-#         )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# _________________________________
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 import json
+import re
 from typing import Optional
 
 from ..models.rag import collection, get_best_maternity_guide
@@ -216,6 +12,69 @@ router = APIRouter()
 
 class QueryRequest(BaseModel):
     message: str
+
+
+def check_language_override(query: str, detected_language: str) -> str:
+    """
+    Check if user explicitly requested a specific language in their query.
+    
+    Examples:
+        - "explain in marathi" → mr
+        - "हिंदी में बताओ" → hi
+        - "தமிழில் சொல்லுங்கள்" → ta
+    
+    Args:
+        query: Original user query
+        detected_language: Language detected by langdetect
+    
+    Returns:
+        str: Language code (override if found, otherwise detected_language)
+    """
+    query_lower = query.lower()
+    
+    # Language override patterns (phrase → language code)
+    language_patterns = {
+        # English patterns
+        r'\bin\s+marathi\b': 'mr',
+        r'\bin\s+hindi\b': 'hi',
+        r'\bin\s+tamil\b': 'ta',
+        r'\bin\s+telugu\b': 'te',
+        r'\bin\s+malayalam\b': 'ml',
+        r'\bin\s+gujarati\b': 'gu',
+        r'\bin\s+odia\b': 'or',
+        r'\bin\s+bengali\b': 'bn',
+        r'\bin\s+punjabi\b': 'pa',
+        r'\bin\s+kannada\b': 'kn',
+        r'\bin\s+assamese\b': 'as',
+        r'\bin\s+urdu\b': 'ur',
+        r'\bin\s+spanish\b': 'es',
+        r'\bin\s+french\b': 'fr',
+        r'\bin\s+german\b': 'de',
+        
+        # Native language patterns
+        r'मराठी\s*(मध्ये|मधे)': 'mr',
+        r'marathi\s*(madhe|madhye)': 'mr',
+        r'हिंदी\s*में': 'hi',
+        r'hindi\s*(me|mein)': 'hi',
+        r'தமிழில்': 'ta',
+        r'తెలుగులో': 'te',
+        r'മലയാളത്തിൽ': 'ml',
+        r'ગુજરાતીમાં': 'gu',
+        r'ଓଡ଼ିଆରେ': 'or',
+        r'বাংলায়': 'bn',
+        r'ਪੰਜਾਬੀ\s*ਵਿੱਚ': 'pa',
+        r'ಕನ್ನಡದಲ್ಲಿ': 'kn',
+        r'অসমীয়াত': 'as',
+        r'اردو\s*میں': 'ur',
+    }
+    
+    for pattern, lang_code in language_patterns.items():
+        if re.search(pattern, query_lower):
+            print(f"Language override detected: {lang_code}")
+            return lang_code
+    
+    return detected_language
+
 
 @router.post("/query_rag/")
 async def query_rag(request: Request, data: QueryRequest):
@@ -239,26 +98,55 @@ async def query_rag(request: Request, data: QueryRequest):
     print("Original Message:", data.message)
 
     try:
-        # Step 1: Process multilingual query (detect language and translate to English)
-        english_query, detected_language = process_multilingual_query(data.message)
+        # Step 1: Fetch last 5 conversation exchanges for context (structured format)
+        conversation_history = []
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT message, response
+                FROM messages
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+                LIMIT 5
+                """,
+                (user_id,)
+            )
+            history_rows = cursor.fetchall()
+            # Reverse to chronological order and format as dict
+            for row in reversed(history_rows):
+                conversation_history.append({
+                    "user": row['message'],
+                    "assistant": row['response']
+                })
+        
+        print(f"Loaded {len(history_rows)} previous exchanges for context")
+        
+        # Step 2: Process multilingual query (detect language and translate to English)
+        english_query, detected_language, is_greeting = process_multilingual_query(data.message)
+        
+        # Step 2.5: Check for explicit language override in the query
+        detected_language = check_language_override(data.message, detected_language)
+        
         print(f"Detected Language: {detected_language}")
         print(f"English Query: {english_query}")
+        print(f"Is Greeting: {is_greeting}")
         
-        # Step 2: Query ChromaDB with English query
+        # Step 3: Query ChromaDB with English query
         results = collection.query(
             query_texts=[english_query],
             n_results=3
         )
 
-        # Step 3: Get the RAG-based response with language parameter
+        # Step 4: Get the RAG-based response with language parameter and conversation history
         response_text = get_best_maternity_guide(
             query=english_query,
             results=results,
-            conversation_history=[],
-            target_language=detected_language
+            conversation_history=conversation_history,
+            target_language=detected_language,
+            is_greeting=is_greeting
         )
 
-        # Step 4: Save message + response to DB with user_id
+        # Step 5: Save message + response to DB with user_id
         with connection.cursor() as cursor:
             cursor.execute(
                 "INSERT INTO messages (user_id, message, response) VALUES (%s, %s, %s)",
@@ -266,7 +154,7 @@ async def query_rag(request: Request, data: QueryRequest):
             )
             connection.commit()
 
-        # Step 5: Return response to frontend
+        # Step 6: Return response to frontend
         return {"response": response_text, "detected_language": detected_language}
 
     except Exception as e:
