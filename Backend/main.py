@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from Backend.routers import reminder_route, whisper_route, hospital_route, rag_route, auth_route, chat_history, tts_route
+from Backend.routers import reminder_route, whisper_route, hospital_route, rag_route, auth_route, chat_history, tts_route, conversation_route
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware  
 import uvicorn
@@ -28,6 +28,7 @@ app.include_router(whisper_route.router, prefix="/api/speech", tags=["Speech Rec
 app.include_router(auth_route.router, prefix="/api", tags=["Authentication"])
 app.include_router(chat_history.router, prefix="/history", tags=["Chat History"])
 app.include_router(tts_route.router, prefix="/tts", tags=["Text to Speech"])
+app.include_router(conversation_route.router, prefix="/api", tags=["Conversations"])
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8002)

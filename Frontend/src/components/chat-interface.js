@@ -4,30 +4,24 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
-import { Menu, Send, PaperclipIcon, Home, Mic } from "lucide-react";
+import { Menu, Send, PaperclipIcon, Home, Mic, Plus, MessageSquare, Trash2 } from "lucide-react";
 import ChatMessage from "./chat-message";
-import Sidebar from "./sidebar";
 
 export default function ChatInterface({ toggleSidebar, isLoggedIn }) {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [messages, setMessages] = useState(() => {
-    // Check for passed state from history
-    const location = useLocation();
-    return (
-      location.state?.messages || [
-        {
-          id: 1,
-          content:
-            "Hello!! I'm Dr MAMA, your medical assistant. How can I help you?",
-          sender: "bot",
-        },
-      ]
-    );
-  });
+  const [conversations, setConversations] = useState([]);
+  const [currentConversationId, setCurrentConversationId] = useState(null);
+  const [messages, setMessages] = useState([
+    {
+      id: 1,
+      content: "Hello!! I'm Dr MAMA, your medical assistant. How can I help you?",
+      sender: "bot",
+    },
+  ]);
   const [inputText, setInputText] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isChatListOpen, setIsChatListOpen] = useState(true);
 
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
@@ -40,21 +34,24 @@ export default function ChatInterface({ toggleSidebar, isLoggedIn }) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Load conversations on mount
+  useEffect(() => {
+    if (checkAuthentication()) {
+      loadConversations();
+    }
+  }, []);
+
   // Check if user is authenticated by verifying cookie or localStorage
   const checkAuthentication = () => {
-    console.log("All cookies:", document.cookie); // Debug: see all cookies
+    console.log("All cookies:", document.cookie);
     
-    // Check if user cookie exists
     const userCookie = document.cookie
       .split("; ")
       .find((row) => row.startsWith("user="));
 
-    console.log("User cookie found:", userCookie); // Debug
-
     if (userCookie) {
       try {
         const userInfo = JSON.parse(decodeURIComponent(userCookie.split("=")[1]));
-        console.log("Parsed user info from cookie:", userInfo); // Debug
         if (userInfo.user_id) {
           return true;
         }
@@ -63,17 +60,136 @@ export default function ChatInterface({ toggleSidebar, isLoggedIn }) {
       }
     }
 
-    // Fallback: Check localStorage for user_id (in case cookie is not accessible)
     const userId = localStorage.getItem("user_id");
-    console.log("User ID from localStorage:", userId); // Debug
-    
     if (userId) {
-      console.log("Authenticated via localStorage");
       return true;
     }
 
-    console.log("No authentication found");
     return false;
+  };
+
+  // Load all conversations for the user
+  const loadConversations = async () => {
+    try {
+      const response = await fetch("http://localhost:8002/api/conversations/list", {
+        method: "GET",
+        credentials: "include",
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setConversations(data.conversations || []);
+        
+        // If no current conversation and conversations exist, select the first one
+        if (!currentConversationId && data.conversations.length > 0) {
+          loadConversation(data.conversations[0].id);
+        } else if (!currentConversationId && data.conversations.length === 0) {
+          // Create a new conversation if none exist
+          createNewConversation();
+        }
+      }
+    } catch (error) {
+      console.error("Error loading conversations:", error);
+    }
+  };
+
+  // Create a new conversation
+  const createNewConversation = async () => {
+    try {
+      const response = await fetch("http://localhost:8002/api/conversations/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({ title: "New Chat" }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setConversations((prev) => [data, ...prev]);
+        setCurrentConversationId(data.id);
+        // Reset messages to just the welcome message
+        setMessages([
+          {
+            id: 1,
+            content: "Hello!! I'm Dr MAMA, your medical assistant. How can I help you?",
+            sender: "bot",
+          },
+        ]);
+      }
+    } catch (error) {
+      console.error("Error creating conversation:", error);
+    }
+  };
+
+  // Load messages for a specific conversation
+  const loadConversation = async (conversationId) => {
+    try {
+      const response = await fetch(
+        `http://localhost:8002/api/conversations/${conversationId}/messages`,
+        {
+          method: "GET",
+          credentials: "include",
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setCurrentConversationId(conversationId);
+        
+        // Convert messages to chat format
+        const chatMessages = [
+          {
+            id: 0,
+            content: "Hello!! I'm Dr MAMA, your medical assistant. How can I help you?",
+            sender: "bot",
+          },
+        ];
+        
+        data.messages.forEach((msg) => {
+          chatMessages.push({
+            id: msg.id,
+            content: msg.content,
+            sender: msg.role === "user" ? "user" : "bot",
+          });
+        });
+        
+        setMessages(chatMessages);
+      }
+    } catch (error) {
+      console.error("Error loading conversation:", error);
+    }
+  };
+
+  // Delete a conversation
+  const deleteConversation = async (conversationId, e) => {
+    e.stopPropagation();
+    
+    if (!window.confirm("Are you sure you want to delete this conversation?")) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `http://localhost:8002/api/conversations/${conversationId}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        }
+      );
+
+      if (response.ok) {
+        setConversations((prev) => prev.filter((c) => c.id !== conversationId));
+        
+        // If deleted conversation was current, create a new one
+        if (currentConversationId === conversationId) {
+          createNewConversation();
+        }
+      }
+    } catch (error) {
+      console.error("Error deleting conversation:", error);
+    }
   };
 
   const handleSendMessage = async () => {
@@ -84,6 +200,13 @@ export default function ChatInterface({ toggleSidebar, isLoggedIn }) {
       alert("Please sign in first to use the chatbot.");
       navigate("/signin");
       return;
+    }
+
+    // Ensure we have a conversation
+    if (!currentConversationId) {
+      await createNewConversation();
+      // Wait a bit for the conversation to be created
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
 
     const newMessage = {
@@ -98,34 +221,20 @@ export default function ChatInterface({ toggleSidebar, isLoggedIn }) {
 
     try {
       console.log("Sending message:", inputText);
+      console.log("Conversation ID:", currentConversationId);
 
-      // Get user_id for potential fallback
-      const userId = localStorage.getItem("user_id");
-
-      // Prepare request body - include user_id as fallback if backend needs it
+      // Prepare request body with conversation_id
       const requestBody = {
         message: inputText,
+        conversation_id: currentConversationId,
       };
-
-      // If no cookie but have localStorage user_id, include it in body
-      const userCookie = document.cookie
-        .split("; ")
-        .find((row) => row.startsWith("user="));
-
-      if (!userCookie && userId) {
-        requestBody.user_id = parseInt(userId, 10);
-        console.log(
-          "No cookie found, including user_id in request body:",
-          requestBody.user_id
-        );
-      }
 
       const response = await fetch("http://localhost:8002/rag/query_rag/", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: "include", // This is important for cookies
+        credentials: "include",
         body: JSON.stringify(requestBody),
       });
 
@@ -164,6 +273,9 @@ export default function ChatInterface({ toggleSidebar, isLoggedIn }) {
       };
 
       setMessages((prevMessages) => [...prevMessages, botResponse]);
+      
+      // Reload conversation list to update titles
+      loadConversations();
     } catch (error) {
       console.error("Error:", error);
 
@@ -341,151 +453,196 @@ export default function ChatInterface({ toggleSidebar, isLoggedIn }) {
   }, []);
 
   return (
-    <div className="chat-interface">
-      <Sidebar
-        isOpen={isSidebarOpen}
-        toggleSidebar={toggleSidebar}
-        isLoggedIn={isLoggedIn}
-        currentChat={{ messages }} // Pass current chat
-      />
-      <header className="chat-header">
-        <div className="header-left">
+    <div className="chat-interface-wrapper">
+      {/* Conversation List Sidebar */}
+      <div className={`conversation-list-sidebar ${isChatListOpen ? 'open' : 'closed'}`}>
+        <div className="sidebar-header-new">
+          <h2 className="sidebar-title-new">Conversations</h2>
           <Button
             variant="ghost"
             size="icon"
-            onClick={toggleSidebar}
-            className="menu-button"
+            onClick={createNewConversation}
+            className="new-chat-btn"
+            title="New Chat"
           >
-            <Menu className="icon" />
-          </Button>
-          <h1 className="app-title">
-            Dr.<span className="text-sky-500 font-bold"> MAMA</span>
-          </h1>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={goToHome}
-            className="home-button"
-          >
-            <Home className="icon" />
+            <Plus className="w-5 h-5" />
           </Button>
         </div>
-
-        <div className="header-right">
-          {!isLoggedIn ? (
-            <div className="auth-buttons">
-              <Button
-                variant="outline"
-                onClick={() => navigate("/signin")}
-                className="signin-button"
-              >
-                Sign In
-              </Button>
-              <Button
-                onClick={() => navigate("/signup")}
-                className="signup-button"
-              >
-                Sign Up
-              </Button>
-            </div>
-          ) : (
-            <div className="user-welcome">
-              <span>Welcome back!</span>
-            </div>
-          )}
-        </div>
-      </header>
-
-      <div className="messages-container">
-        {messages.map((message) => (
-          <ChatMessage key={message.id} message={message} />
-        ))}
-        {isLoading && (
-          <div className="loading-message">
-            <div className="bot-message">
-              <div className="typing-indicator">
-                <span></span>
-                <span></span>
-                <span></span>
+        
+        <div className="conversations-list">
+          {conversations.map((conv) => (
+            <div
+              key={conv.id}
+              onClick={() => loadConversation(conv.id)}
+              className={`conversation-item ${
+                currentConversationId === conv.id ? 'active' : ''
+              }`}
+            >
+              <div className="conversation-info">
+                <div className="conversation-header-row">
+                  <MessageSquare className="conversation-icon" />
+                  <p className="conversation-title">{conv.title}</p>
+                </div>
+                <p className="conversation-date">
+                  {new Date(conv.created_at).toLocaleDateString()}
+                </p>
               </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={(e) => deleteConversation(conv.id, e)}
+                className="delete-conversation-btn"
+                title="Delete conversation"
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
             </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
+          ))}
+        </div>
       </div>
 
-      <div className="input-area">
-        {selectedFiles.length > 0 && (
-          <div className="file-previews">
-            {selectedFiles.map((file, index) => (
-              <div key={index} className="file-preview">
-                {file.type.startsWith("image/") ? (
-                  <div className="image-preview">
-                    <img src={file.url || "/placeholder.svg"} alt={file.name} />
-                  </div>
-                ) : (
-                  <div className="generic-preview">
-                    <div className="file-icon"></div>
-                  </div>
-                )}
-                <button
-                  className="remove-file-button"
-                  onClick={() => removeFile(index)}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
+      {/* Main Chat Area */}
+      <div className="main-chat-area">
+        <header className="chat-header">
+          <div className="header-left">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsChatListOpen(!isChatListOpen)}
+              className="menu-button"
+              title="Toggle chat list"
+            >
+              <Menu className="icon" />
+            </Button>
+            <h1 className="app-title">
+              Dr.<span className="text-sky-500 font-bold"> MAMA</span>
+            </h1>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={goToHome}
+              className="home-button"
+            >
+              <Home className="icon" />
+            </Button>
           </div>
-        )}
 
-        <div className="text-input-container">
-          <Textarea
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={handleKeyPress}
-            placeholder="Describe your symptoms or ask a medical question..."
-            className="message-textarea"
-            disabled={isLoading}
-          />
-          <div className="input-actions">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleRecording}
-              className={`voice-button ${isRecording ? "recording" : ""}`}
-              disabled={isLoading}
-            >
-              <Mic className={`icon ${isRecording ? "pulse" : ""}`} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => fileInputRef.current.click()}
-              className="file-button"
-              disabled={isLoading}
-            >
-              <PaperclipIcon className="icon" />
-            </Button>
-            <Button
-              onClick={handleSendMessage}
-              size="icon"
-              className="send-button"
-              disabled={
-                isLoading || (!inputText.trim() && selectedFiles.length === 0)
-              }
-            >
-              <Send className="icon" />
-            </Button>
+          <div className="header-right">
+            {!isLoggedIn ? (
+              <div className="auth-buttons">
+                <Button
+                  variant="outline"
+                  onClick={() => navigate("/signin")}
+                  className="signin-button"
+                >
+                  Sign In
+                </Button>
+                <Button
+                  onClick={() => navigate("/signup")}
+                  className="signup-button"
+                >
+                  Sign Up
+                </Button>
+              </div>
+            ) : (
+              <div className="user-welcome">
+                <span>Welcome back!</span>
+              </div>
+            )}
           </div>
-          <input
-            type="file"
-            ref={fileInputRef}
-            className="hidden"
-            onChange={handleFileSelect}
-            multiple
-            disabled={isLoading}
-          />
+        </header>
+
+        <div className="messages-container">
+          {messages.map((message) => (
+            <ChatMessage key={message.id} message={message} />
+          ))}
+          {isLoading && (
+            <div className="loading-message">
+              <div className="bot-message">
+                <div className="typing-indicator">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <div className="input-area">
+          {selectedFiles.length > 0 && (
+            <div className="file-previews">
+              {selectedFiles.map((file, index) => (
+                <div key={index} className="file-preview">
+                  {file.type.startsWith("image/") ? (
+                    <div className="image-preview">
+                      <img src={file.url || "/placeholder.svg"} alt={file.name} />
+                    </div>
+                  ) : (
+                    <div className="generic-preview">
+                      <div className="file-icon"></div>
+                    </div>
+                  )}
+                  <button
+                    className="remove-file-button"
+                    onClick={() => removeFile(index)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="text-input-container">
+            <Textarea
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={handleKeyPress}
+              placeholder="Describe your symptoms or ask a medical question..."
+              className="message-textarea"
+              disabled={isLoading}
+            />
+            <div className="input-actions">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleRecording}
+                className={`voice-button ${isRecording ? "recording" : ""}`}
+                disabled={isLoading}
+              >
+                <Mic className={`icon ${isRecording ? "pulse" : ""}`} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => fileInputRef.current.click()}
+                className="file-button"
+                disabled={isLoading}
+              >
+                <PaperclipIcon className="icon" />
+              </Button>
+              <Button
+                onClick={handleSendMessage}
+                size="icon"
+                className="send-button"
+                disabled={
+                  isLoading || (!inputText.trim() && selectedFiles.length === 0)
+                }
+              >
+                <Send className="icon" />
+              </Button>
+            </div>
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              onChange={handleFileSelect}
+              multiple
+              disabled={isLoading}
+            />
+          </div>
         </div>
       </div>
     </div>

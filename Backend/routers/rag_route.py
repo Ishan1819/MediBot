@@ -12,6 +12,7 @@ router = APIRouter()
 
 class QueryRequest(BaseModel):
     message: str
+    conversation_id: int  # Required: conversation ID for message context
 
 
 def check_language_override(query: str, detected_language: str) -> str:
@@ -96,28 +97,47 @@ async def query_rag(request: Request, data: QueryRequest):
 
     print("Final User ID:", user_id)
     print("Original Message:", data.message)
+    print("Conversation ID:", data.conversation_id)
 
     try:
+        # Verify conversation belongs to user
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id FROM conversations WHERE id = %s AND user_id = %s",
+                (data.conversation_id, user_id)
+            )
+            conversation = cursor.fetchone()
+            
+            if not conversation:
+                raise HTTPException(status_code=404, detail="Conversation not found or access denied")
+        
         # Step 1: Fetch last 5 conversation exchanges for context (structured format)
+        # ONLY from this specific conversation
         conversation_history = []
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT message, response
+                SELECT role, content
                 FROM messages
-                WHERE user_id = %s
+                WHERE conversation_id = %s
                 ORDER BY created_at DESC
-                LIMIT 5
+                LIMIT 10
                 """,
-                (user_id,)
+                (data.conversation_id,)
             )
             history_rows = cursor.fetchall()
             # Reverse to chronological order and format as dict
-            for row in reversed(history_rows):
-                conversation_history.append({
-                    "user": row['message'],
-                    "assistant": row['response']
-                })
+            # Group user + assistant pairs
+            temp_history = list(reversed(history_rows))
+            for i in range(0, len(temp_history), 2):
+                if i + 1 < len(temp_history):
+                    if temp_history[i]['role'] == 'user' and temp_history[i+1]['role'] == 'assistant':
+                        conversation_history.append({
+                            "user": temp_history[i]['content'],
+                            "assistant": temp_history[i+1]['content']
+                        })
+            # Limit to last 5 exchanges
+            conversation_history = conversation_history[-5:]
         
         print(f"Loaded {len(history_rows)} previous exchanges for context")
         
@@ -146,13 +166,34 @@ async def query_rag(request: Request, data: QueryRequest):
             is_greeting=is_greeting
         )
 
-        # Step 5: Save message + response to DB with user_id
+        # Step 5: Save message + response to DB with conversation_id
         with connection.cursor() as cursor:
+            # Save user message
             cursor.execute(
-                "INSERT INTO messages (user_id, message, response) VALUES (%s, %s, %s)",
-                (user_id, data.message, response_text)  # Store original message and multilingual response
+                "INSERT INTO messages (conversation_id, user_id, role, content) VALUES (%s, %s, %s, %s)",
+                (data.conversation_id, user_id, 'user', data.message)
+            )
+            # Save assistant response
+            cursor.execute(
+                "INSERT INTO messages (conversation_id, user_id, role, content) VALUES (%s, %s, %s, %s)",
+                (data.conversation_id, user_id, 'assistant', response_text)
             )
             connection.commit()
+            
+            # Update conversation title if it's the first message (title is still "New Chat")
+            cursor.execute(
+                "SELECT title FROM conversations WHERE id = %s",
+                (data.conversation_id,)
+            )
+            conv = cursor.fetchone()
+            if conv and conv['title'] in ['New Chat', 'new chat']:
+                # Generate title from first message (first 50 chars)
+                title = data.message[:50] + ('...' if len(data.message) > 50 else '')
+                cursor.execute(
+                    "UPDATE conversations SET title = %s WHERE id = %s",
+                    (title, data.conversation_id)
+                )
+                connection.commit()
 
         # Step 6: Return response to frontend
         return {"response": response_text, "detected_language": detected_language}
