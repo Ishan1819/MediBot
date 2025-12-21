@@ -79,6 +79,64 @@ for url in career_urls:
 genai.configure(api_key="AIzaSyDlC2TVSnLedPYPZW2RON1pi99ZF2jM7lE")
 
 
+def is_followup_query(query: str) -> bool:
+    """
+    Detects if a query is a follow-up/continuation request.
+    Follow-ups are short, referential queries that depend on recent context.
+    
+    Args:
+        query: User query (in English after translation)
+    
+    Returns:
+        bool: True if query is a follow-up, False otherwise
+    """
+    query_lower = query.lower().strip()
+    
+    # Exact match patterns (common follow-ups)
+    exact_patterns = [
+        "tell me more", "explain", "continue", "go on", "elaborate",
+        "what about", "and then", "next", "more info", "more information",
+        "tell more", "say more", "more details", "expand", "can you explain",
+        "explain more", "tell me about it", "about it", "about that",
+        "last one", "last question", "previous", "that one"
+    ]
+    
+    # Pattern for numbered references ("first point", "third point", "point 2", etc.)
+    numbered_patterns = [
+        "first point", "second point", "third point", "fourth point", "fifth point",
+        "last point", "next point", "point 1", "point 2", "point 3", "point 4", "point 5",
+        "1st point", "2nd point", "3rd point", "4th point", "5th point"
+    ]
+    
+    # Referential words (it, that, this, those, etc.)
+    referential_words = ["it", "that", "this", "those", "these", "them"]
+    
+    # Check exact patterns
+    if query_lower in exact_patterns:
+        return True
+    
+    # Check if starts with exact patterns
+    for pattern in exact_patterns + numbered_patterns:
+        if query_lower.startswith(pattern):
+            return True
+    
+    # Check if query is very short (1-3 words) and contains referential words
+    words = query_lower.split()
+    if len(words) <= 3:
+        for ref_word in referential_words:
+            if ref_word in words:
+                return True
+    
+    # Check for questions about "it" or "that" (e.g., "is it safe?", "what about that?")
+    if any(ref in query_lower for ref in ["it ", " it", "that ", " that", "this ", " this"]):
+        # But exclude questions that introduce new topics
+        new_topic_indicators = ["what is", "who is", "when is", "where is", "why is", "how is"]
+        if not any(indicator in query_lower for indicator in new_topic_indicators):
+            return True
+    
+    return False
+
+
 def needs_history_context(query: str) -> bool:
     """
     Uses LLM to determine if the current query depends on previous conversation context.
@@ -111,68 +169,136 @@ Answer:"""
         return False
 
 
-def summarize_conversation_history(history: list) -> str:
+def summarize_conversation_history(history: list, is_followup: bool = False) -> str:
     """
-    Uses LLM to summarize conversation history into concise bullet points.
+    Summarizes conversation history prioritizing RECENT context.
+    
+    CONTEXT SELECTION RULE:
+    - If is_followup=True → Use ONLY the last assistant response (most recent medical info)
+    - If is_followup=False → Use last 5 user-assistant exchanges (last 10 messages)
     
     Args:
         history: List of dicts with 'role' and 'content' keys
                  [{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}]
+        is_followup: Whether current query is a follow-up (detected by is_followup_query)
     
     Returns:
-        str: Concise summary (1-2 bullet points) of medical topics discussed
+        str: Concise summary focused on RECENT medical topic
     """
     if not history:
         return ""
     
     try:
-        # Format history for summarization (role-based, last 10 messages max)
+        # CRITICAL: Select context based on query type
+        if is_followup:
+            # For follow-ups: Use ONLY the last assistant response
+            # Find the most recent assistant message
+            relevant_history = []
+            for msg in reversed(history):
+                if msg['role'] == 'assistant':
+                    relevant_history = [msg]
+                    break
+            
+            if not relevant_history:
+                return "No recent medical information available."
+            
+            # Return the last assistant response directly (no summarization needed)
+            last_response = relevant_history[0]['content']
+            # Extract first 300 chars for context (avoid overwhelming the prompt)
+            if len(last_response) > 300:
+                return f"Recent context: {last_response[:300]}..."
+            return f"Recent context: {last_response}"
+        
+        else:
+            # For independent queries: Use last 5 exchanges (10 messages)
+            relevant_history = history[-10:]
+        
+        # Format history for summarization
         formatted_history = ""
-        for i, msg in enumerate(history[-10:], 1):
+        for msg in relevant_history:
             role_label = "User" if msg['role'] == 'user' else "Assistant"
             formatted_history += f"{role_label}: {msg['content']}\n\n"
         
         prompt = f"""
-You are a MEDICAL CONVERSATION SUMMARIZER.
+You are a MEDICAL CONVERSATION CONTEXT EXTRACTOR.
 
-Your task is to identify the LAST ACTIVE MEDICAL TOPIC discussed in the conversation
-and the user's intent related to that topic.
+Your task: Extract ALL RELEVANT USER FACTS and the MOST RECENT medical topic.
 
-IMPORTANT RULES:
-- If the current or recent user queries are VERY SHORT or VAGUE
-  (e.g. "safe?", "is it safe?", "dangerous?", "explain", "tell me more", "continue"),
-  you MUST infer that they refer to the LAST CLEAR MEDICAL TOPIC.
-- If there is ANY ambiguity about which topic the user refers to,
-  ALWAYS choose the MOST RECENT medical topic.
-- DO NOT ask clarifying questions.
-- DO NOT introduce new topics.
-- DO NOT include greetings, language, tone, or advice.
-- DO NOT include explanations or recommendations.
+CRITICAL RULES:
+1. EXTRACT USER FACTS: Identify ANY information the user shared about themselves:
+   - Pregnancy month/trimester/week (e.g., "5 months pregnant", "third trimester", "week 20")
+   - Symptoms (e.g., "feeling dizzy", "nausea", "back pain")
+   - Medical conditions (e.g., "diabetes", "high blood pressure")
+   - Previous medical history
+   - ANY other personal health information
+
+2. EXTRACT RECENT TOPIC: What medical topic was recently discussed?
+
+3. PRIORITIZE RECENCY: If the same fact appears multiple times, use the MOST RECENT version.
+
+4. BE COMPLETE: Include ALL relevant facts, not just one.
+
+5. NO SPECULATION: Use ONLY what the user explicitly stated.
 
 Conversation History:
 {formatted_history}
 
 OUTPUT FORMAT:
-- Provide 1–2 SHORT bullet points
-- Each bullet must describe:
-  • the medical topic
-  • the user’s concern or intent
+**User Facts:**
+- [List each fact the user shared about themselves]
 
-Example output:
-- Iron supplementation during the second trimester and concerns about its safety.
+**Recent Topic:**
+- [The medical topic being discussed]
 
-Summary:
+Example:
+**User Facts:**
+- User is 5 months pregnant
+- Experiencing dizziness
+
+**Recent Topic:**
+- Managing dizziness during pregnancy
+
+Context:
 """
         
         model = genai.GenerativeModel("gemini-2.0-flash-exp")
         response = model.generate_content(prompt)
         summary = response.text.strip()
         
-        return summary
+        return summary if summary else "No recent medical topic discussed."
+        
     except Exception as e:
         print(f"Error in summarize_conversation_history: {e}")
         return ""
 
+
+
+def get_last_assistant_language(history: list) -> str:
+    """
+    Extracts the language of the last assistant response for language stability.
+    
+    Args:
+        history: Conversation history list
+    
+    Returns:
+        str: Language code of last response, or None if not detectable
+    """
+    if not history:
+        return None
+    
+    # Find last assistant message
+    for msg in reversed(history):
+        if msg['role'] == 'assistant':
+            content = msg['content']
+            # Simple heuristic: check if response contains non-ASCII (likely non-English)
+            # Or check for language markers in markdown sources
+            try:
+                from Backend.models.translator import detect_language
+                return detect_language(content[:100])  # Check first 100 chars
+            except:
+                return None
+    
+    return None
 
 
 def get_best_maternity_guide(query, results, conversation_history=None, target_language="en", is_greeting=False, is_non_rag=False):
@@ -211,32 +337,50 @@ def get_best_maternity_guide(query, results, conversation_history=None, target_l
                     if source_url not in source_urls:
                         source_urls.append(source_url)
     
-    # LLM-based follow-up detection and history summarization
+    # === CRITICAL: FOLLOW-UP DETECTION & CONTEXT SELECTION ===
+    is_followup = is_followup_query(query)
+    print(f"🔍 Is follow-up query: {is_followup}")
+    
+    # Summarize history with recency priority
     history_context_for_system = ""
     topic_anchoring_rule = ""
-    needs_context = False
     
-    # Only check for history context if NOT a greeting and history exists
-    # if conversation_history and not is_greeting:
-        # Check if query needs conversation context
-        # needs_context = needs_history_context(query)
+    if conversation_history and not is_greeting:
+        summary = summarize_conversation_history(conversation_history, is_followup=is_followup)
+        print(f"📝 Conversation context: {summary}")
         
-        # if needs_context:
-            # Summarize conversation history
-    summary = summarize_conversation_history(conversation_history)
-    print(f"Conversation history summary: {summary}")
-    if summary:
-        history_context_for_system = f"\n\nPREVIOUS CONTEXT (FOR UNDERSTANDING ONLY):\n{summary}"
-        # Add topic anchoring rule for follow-ups
-        topic_anchoring_rule = "\n\nTOPIC ANCHORING RULE: This is a FOLLOW-UP question. You MUST answer STRICTLY within the scope of the MOST RECENT medical topic from the previous context. DO NOT introduce new topics or switch subjects. Stay focused on what was just discussed."
+        if summary:
+            if is_followup:
+                # For follow-ups: Strict anchoring to recent context
+                history_context_for_system = f"\n\nRECENT CONTEXT (CRITICAL - THIS IS WHAT USER IS ASKING ABOUT):\n{summary}"
+                topic_anchoring_rule = "\n\n🎯 FOLLOW-UP DETECTED: The user is asking about the RECENT CONTEXT above. Answer STRICTLY about that topic. DO NOT introduce new information unless directly relevant. DO NOT change topics. Expand on what was just discussed."
+            else:
+                # For independent queries: Use user facts + recent topic
+                history_context_for_system = f"\n\nUSER CONTEXT (CRITICAL - USE THIS INFORMATION):\n{summary}"
+                topic_anchoring_rule = "\n\n💡 IMPORTANT: The USER CONTEXT above contains facts the user shared earlier. USE these facts to answer the current question. DO NOT ask for information that's already provided in the context. If the user asks about something they already told you (like pregnancy month), answer using the context."
     
-    print("Here")
-    # Language instruction based ONLY on current query - HARD OVERRIDE
+    # === LANGUAGE STABILITY RULE ===
+    # Maintain language from last assistant response (unless explicit override)
+    last_response_language = get_last_assistant_language(conversation_history)
+    print(f"🌐 Last response language: {last_response_language}")
+    print(f"🌐 Current target language: {target_language}")
+    
+    # Language lock: For follow-ups, use last response language unless explicitly overridden
+    final_language = target_language
+    if is_followup and last_response_language and target_language == "en":
+        # If follow-up detected and current query is in English but last response was in another language,
+        # maintain the previous language (user likely didn't switch languages intentionally)
+        final_language = last_response_language
+        print(f"🔒 Language locked to previous response: {final_language}")
+    
     language_instruction = ""
-    if target_language != "en":
+    if final_language != "en":
         from Backend.models.translator import LANGUAGE_NAMES
-        lang_name = LANGUAGE_NAMES.get(target_language, target_language)
-        language_instruction = f"\n\nCRITICAL LANGUAGE INSTRUCTION: You MUST respond ONLY in {lang_name} language. IGNORE any language used in previous messages. The response language is determined EXCLUSIVELY by the CURRENT query, NOT by conversation history."
+        lang_name = LANGUAGE_NAMES.get(final_language, final_language)
+        if is_followup:
+            language_instruction = f"\n\nLANGUAGE LOCK: Continue responding in {lang_name} (same as previous response). DO NOT switch languages."
+        else:
+            language_instruction = f"\n\nLANGUAGE: Respond in {lang_name}."
     
     # Special handling for greetings - ONLY if no conversation history
     greeting_instruction = ""
@@ -248,33 +392,77 @@ def get_best_maternity_guide(query, results, conversation_history=None, target_l
         pass
     
     system_prompt = f"""
-    
     You are Dr. MAMA, a helpful AI assistant specializing in pregnancy and postpartum care.
     You were created by Ishan Patil to help expecting mothers and new parents.
-    
-    CRITICAL RULES:
-    1. GREETINGS → If user ONLY says hi/hello (no question), respond ONLY with: "Hello! I'm Dr. MAMA. How can I help you today?" Nothing else.
-    2. CREATOR → If asked who created you, say "I was created by Ishan Patil."
-    3. LANGUAGE → Respond ONLY in the language of the CURRENT query. COMPLETELY IGNORE any language from conversation history.
-    4. FOLLOW-UP QUESTIONS → If user says "tell me more" or similar, expand ONLY on the previous topic from the context below.
-    5. INDEPENDENT QUESTIONS → If it's a new/different question, provide fresh answer. Don't mix with previous topics.
-    6. FOCUS → Answer ONLY what was asked. No extra summaries unless requested.
-    7. Don't answer in Indonesian (Bahasa Indonesia) 🇮🇩 ever.
-    
-    CONVERSATION HISTORY USAGE:
-    - Previous context is provided ONLY when the current query is a follow-up
-    - History is for topic continuity, NOT for language style
-    - NEVER copy language from history
-    
-    DO NOT repeat greetings in responses to medical questions.
-    DO NOT mix answers from different topics unless explicitly asked.
 
-    For medical information:
-    - Use bullet points and sections for clarity
+    CRITICAL RULES:
+
+    1. GREETINGS →
+    If the user ONLY says hi/hello (no medical question),
+    respond ONLY with:
+    "Hello! I'm Dr. MAMA. How can I help you today?"
+    Nothing else.
+
+    2. CREATOR →
+    If asked who created you, respond:
+    "I was created by Ishan Patil."
+
+    3. LANGUAGE SELECTION (STRICT):
+    - If not specified explicitly then use English language always.
+    - For follow-up questions → MAINTAIN the language of the previous response.
+    - Supported languages are ONLY those provided in the allowed language list.
+    - If the detected or requested language is NOT in the supported list,
+        you MUST FALL BACK TO ENGLISH.
+    - NEVER invent, guess, or auto-switch to any unsupported language.
+    - COMPLETELY IGNORE language used in conversation history.
+
+    4. FOLLOW-UP QUESTIONS →
+    If the query is vague or referential
+    (e.g. "tell me more", "explain", "continue", "third point", "last question"),
+    you MUST expand ONLY on the MOST RECENT assistant medical response.
+
+    5. CONTEXT RULE →
+    - For follow-up queries → use ONLY the most recent medical information.
+    - For non-follow-up queries → CHECK USER CONTEXT for user facts (pregnancy month, symptoms, conditions).
+    - USE those facts to answer questions. DO NOT ask for information already in context.
+    - Example: If context shows "User is 5 months pregnant" and user asks "which month am I in?" → Answer "You are 5 months pregnant."
+
+    6. INDEPENDENT QUESTIONS →
+    If the question is new or unrelated, answer it fresh.
+    DO NOT mix previous topics unless explicitly asked.
+    BUT ALWAYS check USER CONTEXT for relevant facts first.
+
+    7. FOCUS →
+    Answer ONLY what was asked.
+    No extra summaries unless the user asks for them.
+
+    8. RESTRICTED LANGUAGES →
+    NEVER respond in Indonesian (Bahasa Indonesia 🇮🇩), even if requested.
+
+    CONVERSATION HISTORY USAGE:
+    - History is ONLY for topic continuity.
+    - History MUST NOT influence language choice.
+    - NEVER copy phrasing or language style from history.
+
+    RESPONSE FORMAT (MEDICAL):
+    - Prefer numbered points (1, 2, 3…) when helpful
+    - Use bullet points and sections
     - Use markdown formatting
-    - Use **bold** for important terms and *italics* for emphasis
-    - Keep answers concise and precise{history_context_for_system}{topic_anchoring_rule}{language_instruction}{greeting_instruction}
+    - Use **bold** for key terms and *italics* for emphasis
+    - Keep answers concise, precise, and medically relevant
+
+    DO NOT:
+    - Repeat greetings in medical answers
+    - Mix unrelated topics
+    - Change language unless explicitly requested AND supported
+    - Ask for information that's already in USER CONTEXT
+
+    {history_context_for_system}
+    {topic_anchoring_rule}
+    {language_instruction}
+    {greeting_instruction}
     """
+
 
     user_prompt = f"User Query: {query}\n\nExtracted Information:\n{matched_texts}"
 
@@ -302,3 +490,63 @@ def get_best_maternity_guide(query, results, conversation_history=None, target_l
             formatted_response += f"- {source}\n"
     
     return formatted_response
+
+
+# You are Dr. MAMA, a helpful AI assistant specializing in pregnancy and postpartum care.
+# You were created by Ishan Patil to help expecting mothers and new parents.{history_context_for_system}{topic_anchoring_rule}
+
+# === CRITICAL RULES ===
+
+# 1. GREETINGS
+#    - If user ONLY says hi/hello (no question) → "Hello! I'm Dr. MAMA. How can I help you today?"
+#    - DO NOT repeat greetings in medical responses
+
+# 2. CREATOR
+#    - If asked who created you → "I was created by Ishan Patil."
+
+# 3. LANGUAGE STABILITY
+#    - For follow-up questions → MAINTAIN the language of the previous response
+#    - For new questions → Use the language of the current query
+#    - NEVER mix languages within a single response
+#    - NEVER switch languages mid-conversation unless explicitly requested
+
+# 4. FOLLOW-UP QUESTIONS ("tell me more", "explain", "continue", "third point")
+#    - The RECENT CONTEXT above shows what we just discussed
+#    - Answer STRICTLY about that context
+#    - DO NOT introduce new topics
+#    - DO NOT say "no context" - the context is RIGHT ABOVE
+#    - Expand or clarify what was JUST discussed
+
+# 5. INDEPENDENT QUESTIONS
+#    - Provide fresh, focused answer
+#    - Don't reference previous topics unless relevant
+
+# 6. RESPONSE STRUCTURE (MEDICAL INFORMATION)
+#    - Use NUMBERED LISTS (1, 2, 3...) for steps, precautions, foods, symptoms, etc.
+#    - Use **bold** for important terms (e.g., **Iron deficiency**, **Third trimester**)
+#    - Use *italics* for emphasis (e.g., *essential*, *recommended*)
+#    - Keep answers CONCISE and PRECISE
+#    - Avoid long paragraphs - break into points
+
+# 7. FOCUS
+#    - Answer ONLY what was asked
+#    - No extra summaries unless requested
+#    - No unnecessary elaboration
+
+# 8. LANGUAGE RESTRICTIONS
+#    - DO NOT respond in Indonesian (Bahasa Indonesia) 🇮🇩
+
+# === EXAMPLE RESPONSE FORMAT ===
+
+# Question: "What foods should I eat in the third trimester?"
+
+# Response:
+# **Third Trimester Nutrition:**
+
+# 1. **Iron-rich foods**: Spinach, lentils, red meat
+# 2. **Calcium sources**: Milk, yogurt, cheese
+# 3. **Protein**: Eggs, fish, chicken
+# 4. **Fiber**: Whole grains, fruits, vegetables
+# 5. **Omega-3**: Salmon, walnuts, chia seeds
+
+# *Consult your doctor for personalized dietary advice.*{language_instruction}{greeting_instruction}

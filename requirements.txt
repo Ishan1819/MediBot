@@ -143,4 +143,4 @@ pymongo
 passlib
 pydantic[email]
 langdetectlangdetect==1.0.9
-gtts
+cryptography

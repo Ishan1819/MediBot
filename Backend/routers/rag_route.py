@@ -49,9 +49,6 @@ def check_language_override(query: str, detected_language: str) -> str:
         r'\bin\s+kannada\b': 'kn',
         r'\bin\s+assamese\b': 'as',
         r'\bin\s+urdu\b': 'ur',
-        r'\bin\s+spanish\b': 'es',
-        r'\bin\s+french\b': 'fr',
-        r'\bin\s+german\b': 'de',
         
         # Native language patterns
         r'मराठी\s*(मध्ये|मधे)': 'mr',
