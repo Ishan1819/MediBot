@@ -111,8 +111,8 @@ async def query_rag(request: Request, data: QueryRequest):
             if not conversation:
                 raise HTTPException(status_code=404, detail="Conversation not found or access denied")
         
-        # Step 1: Fetch last 5 conversation exchanges for context (structured format)
-        # ONLY from this specific conversation
+        # Step 1: Fetch conversation history for context (role-based format)
+        # ONLY from this specific conversation, ordered chronologically
         conversation_history = []
         with connection.cursor() as cursor:
             cursor.execute(
@@ -120,26 +120,20 @@ async def query_rag(request: Request, data: QueryRequest):
                 SELECT role, content
                 FROM messages
                 WHERE conversation_id = %s
-                ORDER BY created_at DESC
-                LIMIT 10
+                ORDER BY created_at ASC
+                LIMIT 20
                 """,
                 (data.conversation_id,)
             )
             history_rows = cursor.fetchall()
-            # Reverse to chronological order and format as dict
-            # Group user + assistant pairs
-            temp_history = list(reversed(history_rows))
-            for i in range(0, len(temp_history), 2):
-                if i + 1 < len(temp_history):
-                    if temp_history[i]['role'] == 'user' and temp_history[i+1]['role'] == 'assistant':
-                        conversation_history.append({
-                            "user": temp_history[i]['content'],
-                            "assistant": temp_history[i+1]['content']
-                        })
-            # Limit to last 5 exchanges
-            conversation_history = conversation_history[-5:]
+            # Build role-based history list (no pairing)
+            for row in history_rows:
+                conversation_history.append({
+                    "role": row['role'],
+                    "content": row['content']
+                })
         
-        print(f"Loaded {len(history_rows)} previous exchanges for context")
+        print(f"Loaded {len(conversation_history)} messages for conversation context")
         
         # Step 2: Process multilingual query (detect language and translate to English)
         english_query, detected_language, is_greeting = process_multilingual_query(data.message)

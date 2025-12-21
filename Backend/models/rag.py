@@ -112,7 +112,8 @@ def summarize_conversation_history(history: list) -> str:
     Uses LLM to summarize conversation history into concise bullet points.
     
     Args:
-        history: List of dicts with 'user' and 'assistant' keys
+        history: List of dicts with 'role' and 'content' keys
+                 [{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}]
     
     Returns:
         str: Concise summary (1-2 bullet points) of medical topics discussed
@@ -121,14 +122,11 @@ def summarize_conversation_history(history: list) -> str:
         return ""
     
     try:
-        # Format history for summarization
+        # Format history for summarization (role-based, last 10 messages max)
         formatted_history = ""
-        for i, exchange in enumerate(history[-5:], 1):  # Last 5 exchanges max
-            formatted_history += (
-                f"\nExchange {i}:\n"
-                f"User: {exchange['user']}\n"
-                f"Assistant: {exchange['assistant']}\n"
-            )
+        for i, msg in enumerate(history[-10:], 1):
+            role_label = "User" if msg['role'] == 'user' else "Assistant"
+            formatted_history += f"{role_label}: {msg['content']}\n\n"
         
         prompt = f"""
 You are a MEDICAL CONVERSATION SUMMARIZER.
@@ -180,7 +178,8 @@ def get_best_maternity_guide(query, results, conversation_history=None, target_l
     Args:
         query: User query (in English after translation)
         results: ChromaDB search results
-        conversation_history: List of dicts with 'user' and 'assistant' keys (optional)
+        conversation_history: List of dicts with 'role' and 'content' keys (optional)
+                              [{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}]
         target_language: Language code for response (default: "en")
         is_greeting: Whether the query is a greeting
     
@@ -203,18 +202,18 @@ def get_best_maternity_guide(query, results, conversation_history=None, target_l
     needs_context = False
     
     # Only check for history context if NOT a greeting and history exists
-    if conversation_history and not is_greeting:
+    # if conversation_history and not is_greeting:
         # Check if query needs conversation context
         # needs_context = needs_history_context(query)
         
         # if needs_context:
             # Summarize conversation history
-        summary = summarize_conversation_history(conversation_history)
-        print(f"Conversation history summary: {summary}")
-        if summary:
-            history_context_for_system = f"\n\nPREVIOUS CONTEXT (FOR UNDERSTANDING ONLY):\n{summary}"
-            # Add topic anchoring rule for follow-ups
-            topic_anchoring_rule = "\n\nTOPIC ANCHORING RULE: This is a FOLLOW-UP question. You MUST answer STRICTLY within the scope of the MOST RECENT medical topic from the previous context. DO NOT introduce new topics or switch subjects. Stay focused on what was just discussed."
+    summary = summarize_conversation_history(conversation_history)
+    print(f"Conversation history summary: {summary}")
+    if summary:
+        history_context_for_system = f"\n\nPREVIOUS CONTEXT (FOR UNDERSTANDING ONLY):\n{summary}"
+        # Add topic anchoring rule for follow-ups
+        topic_anchoring_rule = "\n\nTOPIC ANCHORING RULE: This is a FOLLOW-UP question. You MUST answer STRICTLY within the scope of the MOST RECENT medical topic from the previous context. DO NOT introduce new topics or switch subjects. Stay focused on what was just discussed."
     
     print("Here")
     # Language instruction based ONLY on current query - HARD OVERRIDE

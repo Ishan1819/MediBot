@@ -7,7 +7,7 @@ import { Textarea } from "./ui/textarea";
 import { Menu, Send, PaperclipIcon, Home, Mic, Plus, MessageSquare, Trash2 } from "lucide-react";
 import ChatMessage from "./chat-message";
 
-export default function ChatInterface({ toggleSidebar, isLoggedIn }) {
+export default function ChatInterface({ isLoggedIn, handleLogout }) {
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [messages, setMessages] = useState([
@@ -457,19 +457,29 @@ export default function ChatInterface({ toggleSidebar, isLoggedIn }) {
       {/* Conversation List Sidebar */}
       <div className={`conversation-list-sidebar ${isChatListOpen ? 'open' : 'closed'}`}>
         <div className="sidebar-header-new">
-          <h2 className="sidebar-title-new">Conversations</h2>
+          <div className="sidebar-logo">
+            <h2 className="sidebar-brand">
+              Dr.<span className="text-sky-500 font-bold"> MAMA</span>
+            </h2>
+          </div>
+        </div>
+
+        <div className="sidebar-new-chat">
           <Button
-            variant="ghost"
-            size="icon"
             onClick={createNewConversation}
-            className="new-chat-btn"
-            title="New Chat"
+            className="new-chat-button-full"
           >
-            <Plus className="w-5 h-5" />
+            <Plus className="w-5 h-5 mr-2" />
+            New Chat
           </Button>
         </div>
         
         <div className="conversations-list">
+          <div className="history-header-mini">
+            <MessageSquare className="history-icon-mini" />
+            <span>Recent Conversations</span>
+          </div>
+          
           {conversations.map((conv) => (
             <div
               key={conv.id}
@@ -479,10 +489,7 @@ export default function ChatInterface({ toggleSidebar, isLoggedIn }) {
               }`}
             >
               <div className="conversation-info">
-                <div className="conversation-header-row">
-                  <MessageSquare className="conversation-icon" />
-                  <p className="conversation-title">{conv.title}</p>
-                </div>
+                <p className="conversation-title">{conv.title}</p>
                 <p className="conversation-date">
                   {new Date(conv.created_at).toLocaleDateString()}
                 </p>
