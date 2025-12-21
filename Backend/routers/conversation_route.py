@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 import json
 from typing import Optional, List
 from datetime import datetime
 
 from Backend.routers.auth_route import connection
+from Backend.auth_dependencies import get_current_user_id
 
 router = APIRouter()
 
@@ -29,23 +30,14 @@ class MessageResponse(BaseModel):
 
 
 @router.post("/conversations/create")
-async def create_conversation(request: Request, data: CreateConversationRequest):
+async def create_conversation(
+    data: CreateConversationRequest,
+    user_id: int = Depends(get_current_user_id)
+):
     """
     Create a new conversation for the authenticated user.
+    User ID is retrieved from validated session.
     """
-    # Extract user_id from cookie
-    user_cookie = request.cookies.get("user")
-    if not user_cookie:
-        raise HTTPException(status_code=401, detail="User not authenticated. Please login.")
-    
-    try:
-        user_info = json.loads(user_cookie)
-        user_id = user_info.get("user_id")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid user cookie.")
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="Invalid user cookie format.")
-    
     try:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -75,23 +67,11 @@ async def create_conversation(request: Request, data: CreateConversationRequest)
 
 
 @router.get("/conversations/list")
-async def list_conversations(request: Request):
+async def list_conversations(user_id: int = Depends(get_current_user_id)):
     """
     List all conversations for the authenticated user.
+    User ID is retrieved from validated session.
     """
-    # Extract user_id from cookie
-    user_cookie = request.cookies.get("user")
-    if not user_cookie:
-        raise HTTPException(status_code=401, detail="User not authenticated. Please login.")
-    
-    try:
-        user_info = json.loads(user_cookie)
-        user_id = user_info.get("user_id")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid user cookie.")
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="Invalid user cookie format.")
-    
     try:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -123,23 +103,14 @@ async def list_conversations(request: Request):
 
 
 @router.get("/conversations/{conversation_id}/messages")
-async def get_conversation_messages(conversation_id: int, request: Request):
+async def get_conversation_messages(
+    conversation_id: int,
+    user_id: int = Depends(get_current_user_id)
+):
     """
     Get all messages for a specific conversation.
+    User ID is retrieved from validated session.
     """
-    # Extract user_id from cookie
-    user_cookie = request.cookies.get("user")
-    if not user_cookie:
-        raise HTTPException(status_code=401, detail="User not authenticated. Please login.")
-    
-    try:
-        user_info = json.loads(user_cookie)
-        user_id = user_info.get("user_id")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid user cookie.")
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="Invalid user cookie format.")
-    
     try:
         with connection.cursor() as cursor:
             # Verify conversation belongs to user
@@ -187,23 +158,14 @@ async def get_conversation_messages(conversation_id: int, request: Request):
 
 
 @router.delete("/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: int, request: Request):
+async def delete_conversation(
+    conversation_id: int,
+    user_id: int = Depends(get_current_user_id)
+):
     """
     Delete a conversation and all its messages.
+    User ID is retrieved from validated session.
     """
-    # Extract user_id from cookie
-    user_cookie = request.cookies.get("user")
-    if not user_cookie:
-        raise HTTPException(status_code=401, detail="User not authenticated. Please login.")
-    
-    try:
-        user_info = json.loads(user_cookie)
-        user_id = user_info.get("user_id")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid user cookie.")
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="Invalid user cookie format.")
-    
     try:
         with connection.cursor() as cursor:
             # Verify conversation belongs to user

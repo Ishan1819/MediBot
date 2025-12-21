@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 import json
 import re
@@ -7,6 +7,7 @@ from typing import Optional
 from ..models.rag import collection, get_best_maternity_guide
 from ..models.translator import process_multilingual_query
 from Backend.routers.auth_route import connection  # import DB connection
+from Backend.auth_dependencies import get_current_user_id
 
 router = APIRouter()
 
@@ -78,24 +79,15 @@ def check_language_override(query: str, detected_language: str) -> str:
 
 
 @router.post("/query_rag/")
-async def query_rag(request: Request, data: QueryRequest):
-    user_id = None
-    
-    # First, try to get user info from cookies
-    user_cookie = request.cookies.get("user")
-    if user_cookie:
-        try:
-            user_info = json.loads(user_cookie)
-            user_id = user_info.get("user_id")
-            print(f"User ID from cookie: {user_id}")
-        except Exception as e:
-            print(f"Error parsing user cookie: {e}")
-    
-    # If still no user_id, return 401
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User not authenticated. Please login.")
-
-    print("Final User ID:", user_id)
+async def query_rag(
+    data: QueryRequest,
+    user_id: int = Depends(get_current_user_id)
+):
+    """
+    Process RAG query for authenticated user.
+    User ID is retrieved from validated session.
+    """
+    print("User ID from session:", user_id)
     print("Original Message:", data.message)
     print("Conversation ID:", data.conversation_id)
 
@@ -136,7 +128,7 @@ async def query_rag(request: Request, data: QueryRequest):
         print(f"Loaded {len(conversation_history)} messages for conversation context")
         
         # Step 2: Process multilingual query (detect language and translate to English)
-        english_query, detected_language, is_greeting = process_multilingual_query(data.message)
+        english_query, detected_language, is_greeting, is_non_rag = process_multilingual_query(data.message)
         
         # Step 2.5: Check for explicit language override in the query
         detected_language = check_language_override(data.message, detected_language)
@@ -144,11 +136,13 @@ async def query_rag(request: Request, data: QueryRequest):
         print(f"Detected Language: {detected_language}")
         print(f"English Query: {english_query}")
         print(f"Is Greeting: {is_greeting}")
+        print(f"Is Non-RAG Intent: {is_non_rag}")
         
-        # Step 3: Query ChromaDB with English query
+        # Step 3: Query ChromaDB with English query (include metadatas for source attribution)
         results = collection.query(
             query_texts=[english_query],
-            n_results=3
+            n_results=3,
+            include=["documents", "metadatas"]  # Include metadata to extract source URLs
         )
 
         # Step 4: Get the RAG-based response with language parameter and conversation history
@@ -157,7 +151,8 @@ async def query_rag(request: Request, data: QueryRequest):
             results=results,
             conversation_history=conversation_history,
             target_language=detected_language,
-            is_greeting=is_greeting
+            is_greeting=is_greeting,
+            is_non_rag=is_non_rag
         )
 
         # Step 5: Save message + response to DB with conversation_id

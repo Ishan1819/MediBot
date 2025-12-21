@@ -50,14 +50,20 @@ export default function SignUp({ onLogin }) {
         }),
       });
 
-      if (!response.ok) throw new Error("Signup failed");
+      if (!response.ok) {
+        const errData = await response.json();
+        setPasswordError(errData.detail || "Signup failed");
+        throw new Error(errData.detail || "Signup failed");
+      }
 
-      const user = await response.json();
-      onLogin(user);
-      navigate("/chat");
+      const result = await response.json();
+      
+      // After successful signup, redirect to sign-in page
+      // User needs to log in to create a session
+      navigate("/signin");
     } catch (error) {
       console.error("Signup error:", error);
-      // Optionally display error to user
+      // Error is already displayed via setPasswordError
     } finally {
       setIsLoading(false);
     }

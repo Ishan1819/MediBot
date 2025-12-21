@@ -7,7 +7,7 @@ import { Textarea } from "./ui/textarea";
 import { Menu, Send, PaperclipIcon, Home, Mic, Plus, MessageSquare, Trash2 } from "lucide-react";
 import ChatMessage from "./chat-message";
 
-export default function ChatInterface({ isLoggedIn, handleLogout }) {
+export default function ChatInterface({ handleLogout }) {
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [messages, setMessages] = useState([
@@ -35,38 +35,10 @@ export default function ChatInterface({ isLoggedIn, handleLogout }) {
   }, [messages]);
 
   // Load conversations on mount
+  // Note: Authentication is handled by ProtectedRoute wrapper
   useEffect(() => {
-    if (checkAuthentication()) {
-      loadConversations();
-    }
+    loadConversations();
   }, []);
-
-  // Check if user is authenticated by verifying cookie or localStorage
-  const checkAuthentication = () => {
-    console.log("All cookies:", document.cookie);
-    
-    const userCookie = document.cookie
-      .split("; ")
-      .find((row) => row.startsWith("user="));
-
-    if (userCookie) {
-      try {
-        const userInfo = JSON.parse(decodeURIComponent(userCookie.split("=")[1]));
-        if (userInfo.user_id) {
-          return true;
-        }
-      } catch (error) {
-        console.error("Error parsing user cookie:", error);
-      }
-    }
-
-    const userId = localStorage.getItem("user_id");
-    if (userId) {
-      return true;
-    }
-
-    return false;
-  };
 
   // Load all conversations for the user
   const loadConversations = async () => {
@@ -194,13 +166,6 @@ export default function ChatInterface({ isLoggedIn, handleLogout }) {
 
   const handleSendMessage = async () => {
     if (!inputText.trim() && selectedFiles.length === 0) return;
-
-    // Check authentication before sending message
-    if (!checkAuthentication()) {
-      alert("Please sign in first to use the chatbot.");
-      navigate("/signin");
-      return;
-    }
 
     // Ensure we have a conversation
     if (!currentConversationId) {
@@ -336,12 +301,6 @@ export default function ChatInterface({ isLoggedIn, handleLogout }) {
 
   // Update the toggleRecording function
   const toggleRecording = async () => {
-    if (!checkAuthentication()) {
-      alert("Please sign in first to use voice recording.");
-      navigate("/signin");
-      return;
-    }
-
     if (!isRecording) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -442,16 +401,6 @@ export default function ChatInterface({ isLoggedIn, handleLogout }) {
     navigate("/");
   };
 
-  // Add effect to check authentication status on component mount
-  useEffect(() => {
-    const isAuth = checkAuthentication();
-    if (!isAuth && window.location.pathname === "/chat") {
-      console.log("No valid authentication found, redirecting to signin");
-      // Optionally redirect to signin if on chat page without auth
-      // navigate("/signin");
-    }
-  }, []);
-
   return (
     <div className="chat-interface-wrapper">
       {/* Conversation List Sidebar */}
@@ -535,27 +484,10 @@ export default function ChatInterface({ isLoggedIn, handleLogout }) {
           </div>
 
           <div className="header-right">
-            {!isLoggedIn ? (
-              <div className="auth-buttons">
-                <Button
-                  variant="outline"
-                  onClick={() => navigate("/signin")}
-                  className="signin-button"
-                >
-                  Sign In
-                </Button>
-                <Button
-                  onClick={() => navigate("/signup")}
-                  className="signup-button"
-                >
-                  Sign Up
-                </Button>
-              </div>
-            ) : (
-              <div className="user-welcome">
-                <span>Welcome back!</span>
-              </div>
-            )}
+            {/* User is always logged in when ProtectedRoute allows access */}
+            <div className="user-welcome">
+              <span>Welcome back!</span>
+            </div>
           </div>
         </header>
 

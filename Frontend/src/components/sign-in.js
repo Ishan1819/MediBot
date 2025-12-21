@@ -28,12 +28,15 @@ export default function SignIn({ onLogin }) {
     setError("");
 
     try {
+      console.log("🔐 Attempting login...");
       const response = await fetch("http://localhost:8002/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include", // Required to receive and send cookies
         body: JSON.stringify(formData),
       });
+
+      console.log("📡 Login response status:", response.status);
 
       if (!response.ok) {
         const errData = await response.json();
@@ -42,21 +45,25 @@ export default function SignIn({ onLogin }) {
       }
 
       const user = await response.json();
+      console.log("✅ Login successful, user data:", user);
 
-      // ✅ Store user_id in localStorage
-      localStorage.setItem("user_id", user.user_id);
-
-      // Optional: store more like email
+      // Store email in localStorage for display purposes only
       localStorage.setItem("email", user.email);
 
-      // Optional: call parent onLogin
+      // Check if cookie was set
+      console.log("🍪 Cookies after login:", document.cookie);
+
+      // Call parent onLogin for UI state sync (optional)
       if (onLogin) {
         onLogin(user);
       }
 
+      // Navigate immediately - ProtectedRoute will validate session cookie
+      // No need to wait for React state updates
+      console.log("🚀 Navigating to /chat");
       navigate("/chat");
     } catch (error) {
-      console.error("Login error:", error);
+      console.error("❌ Login error:", error);
     } finally {
       setIsLoading(false);
     }

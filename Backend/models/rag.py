@@ -65,12 +65,16 @@ model = SentenceTransformer("all-MiniLM-L6-v2")
 chroma_client = chromadb.PersistentClient(path="./career_db")
 collection = chroma_client.get_or_create_collection(name="career_guidance")
 
-#ChromaDB
+#ChromaDB - Add documents with source metadata
 existing_ids = set(collection.get()["ids"])
 for url in career_urls:
     if url not in existing_ids:
         text = extract_text_from_website(url)
-        collection.add(ids=[url], documents=[text])
+        collection.add(
+            ids=[url],
+            documents=[text],
+            metadatas=[{"source": url}]  # Add source metadata
+        )
 
 genai.configure(api_key="AIzaSyDlC2TVSnLedPYPZW2RON1pi99ZF2jM7lE")
 
@@ -171,7 +175,7 @@ Summary:
 
 
 
-def get_best_maternity_guide(query, results, conversation_history=None, target_language="en", is_greeting=False):
+def get_best_maternity_guide(query, results, conversation_history=None, target_language="en", is_greeting=False, is_non_rag=False):
     """
     Fetches the best response based on AI guidance and retrieved documents.
     
@@ -182,6 +186,7 @@ def get_best_maternity_guide(query, results, conversation_history=None, target_l
                               [{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}]
         target_language: Language code for response (default: "en")
         is_greeting: Whether the query is a greeting
+        is_non_rag: Whether the query is a non-RAG intent (identity, capability, privacy)
     
     Returns:
         str: Response in the target language
@@ -195,6 +200,16 @@ def get_best_maternity_guide(query, results, conversation_history=None, target_l
         return error_msg
 
     matched_texts = "\n\n".join(results["documents"][0])
+    
+    # Extract unique source URLs from metadata
+    source_urls = []
+    if "metadatas" in results and results["metadatas"]:
+        for metadata_list in results["metadatas"]:
+            for metadata in metadata_list:
+                if metadata and "source" in metadata:
+                    source_url = metadata["source"]
+                    if source_url not in source_urls:
+                        source_urls.append(source_url)
     
     # LLM-based follow-up detection and history summarization
     history_context_for_system = ""
@@ -268,5 +283,22 @@ def get_best_maternity_guide(query, results, conversation_history=None, target_l
 
     # Clean up the response to ensure proper formatting
     formatted_response = response.text.strip()
+    
+    # Append sources ONLY for informational RAG-based responses
+    # DO NOT show sources for:
+    # - Greetings (hi, hello, etc.)
+    # - Non-RAG intents (identity questions like "who am I?", capability questions, privacy)
+    # - Any response that doesn't rely on retrieved documents
+    should_show_sources = (
+        source_urls and  # Sources exist (documents were retrieved)
+        len(source_urls) > 0 and  # At least one source
+        not is_greeting and  # Not a greeting
+        not is_non_rag  # Not an identity/capability/privacy question
+    )
+    
+    if should_show_sources:
+        formatted_response += "\n\n---\n**Sources:**\n"
+        for source in source_urls:
+            formatted_response += f"- {source}\n"
     
     return formatted_response

@@ -32,6 +32,48 @@ LANGUAGE_NAMES = {
 SUPPORTED_LANGUAGES = list(LANGUAGE_NAMES.keys())
 
 
+def is_non_rag_intent(text: str) -> bool:
+    """
+    Checks if the text is a non-RAG intent (identity, capability, privacy question).
+    These questions should NOT trigger source attribution as they don't rely on retrieved documents.
+    
+    Args:
+        text: Input text to check
+        
+    Returns:
+        bool: True if non-RAG intent, False otherwise
+    """
+    text_lower = text.lower().strip()
+    
+    # Identity / self-awareness questions
+    identity_patterns = [
+        "who am i", "who i am", "do you know me", "do you remember me",
+        "what is my name", "whats my name", "my name is", "tell me about me",
+        "know who i am", "remember my name"
+    ]
+    
+    # Capability / limitation questions
+    capability_patterns = [
+        "what can you do", "what are your capabilities", "what do you know",
+        "can you help", "are you ai", "are you a bot", "are you human",
+        "who created you", "who made you", "what are you"
+    ]
+    
+    # Privacy / data questions
+    privacy_patterns = [
+        "do you store", "do you save", "my data", "my information",
+        "privacy policy", "data protection"
+    ]
+    
+    all_patterns = identity_patterns + capability_patterns + privacy_patterns
+    
+    for pattern in all_patterns:
+        if pattern in text_lower:
+            return True
+    
+    return False
+
+
 def is_greeting(text: str) -> bool:
     """
     Checks if the text is a PURE greeting (not a question with greeting words).
@@ -193,10 +235,12 @@ def process_multilingual_query(query: str) -> tuple:
         query: User query in any language
         
     Returns:
-        tuple: (english_query, detected_language, is_greeting_flag)
+        tuple: (english_query, detected_language, is_greeting_flag, is_non_rag_flag)
     """
-    # Check if it's a greeting - always respond in English for greetings
+    # Check if it's a greeting
     is_greeting_msg = is_greeting(query)
+    # Check if it's a non-RAG intent (identity, capability, privacy)
+    is_non_rag_msg = is_non_rag_intent(query)
     
     detected_lang = detect_language(query)
     
@@ -221,4 +265,4 @@ def process_multilingual_query(query: str) -> tuple:
     else:
         english_query = query
     
-    return english_query, detected_lang, is_greeting_msg
+    return english_query, detected_lang, is_greeting_msg, is_non_rag_msg
